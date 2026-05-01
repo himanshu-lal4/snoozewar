@@ -208,10 +208,40 @@
 - Updated feature list with analytics (7) and viral sharing (12) features
 - Saved 8 memories to claude-mem (IDs #6207-#6215)
 
+## Vision: Solve ALL Five Competitor Problems in One App
+
+**Decision (2026-05-01):** SnoozeWar will not just solve the night-to-morning enforcement gap — it will absorb every core problem our competitors solve individually, into one unified product.
+
+| Competitor | Their Problem | How SnoozeWar Solves It |
+|-----------|--------------|------------------------|
+| **Alarmy** | "I can't stop hitting snooze — force me out of bed" | Alarm + missions + Dare Engine enforcement |
+| **Sleep Cycle** | "I want to understand my sleep quality and wake up at the right moment" | Chronotype intelligence layer + passive sleep tracking + smart alarm window |
+| **RISE** | "I don't know my sleep debt or energy peaks/dips" | Sleep debt tracking + energy schedule + chronotype-aware timing |
+| **Fabulous** | "I want to build healthy routines but can't stick to them" | Night + morning routine enforcement + streak + Life Score + progressive habit building |
+| **Opal** | "I can't stop doomscrolling — block my apps for me" | Night Mode screen lockdown + bedtime enforcement + phone-down dares |
+| **SnoozeWar (unique)** | "I lose control of my night AND my morning — fix my entire sleep-wake cycle" | Full-cycle enforcement: night → sleep → wake → morning routine, all in one loop |
+
+**Why this works:** Every competitor solves ONE half of the problem. Nobody owns the full night-to-morning enforcement loop. SnoozeWar is the first app that says: put your phone down at night, wake up on time, AND own your first 30 minutes — all enforced, all scored, all in one place.
+
+### Fix Every Competitor's User Complaints (Decision: 2026-05-01)
+We cataloged 300+ user complaints across all 5 competitors (Reddit, App Store, Play Store, Instagram, Facebook, Trustpilot) and designed SnoozeWar's response to each. Full mapping: `strategy/competitor-problems-we-solve.md`. Key design principles derived:
+1. No ads, ever
+2. Alarm reliability is non-negotiable (AlarmKit)
+3. Transparent billing (one subscription, no tricks)
+4. Score behavior, not sleep (avoid orthosomnia)
+5. Behavioral motivation > technical restriction
+6. Respect vulnerable users (ADHD-friendly by design)
+7. 48-hour support response
+8. Android = iOS from Day 1
+9. Free tier never shrinks
+10. Dare Engine prevents content fatigue
+
 ## Direction
 Building a **behavior enforcement app** — one app covering the full cycle:
-- **Night Mode:** Bedtime enforcement with "Procrastinate sleeping if you can" dare countdown
-- **Morning Mode:** Alarm with missions + expiring morning digest + morning journal
+- **Night Mode:** Bedtime enforcement with "Procrastinate sleeping if you can" dare countdown + screen lockdown (solves Opal)
+- **Morning Mode:** Alarm with missions + expiring morning digest + morning journal (solves Alarmy)
+- **Sleep Intelligence:** Chronotype detection + sleep debt tracking + smart alarm window (solves Sleep Cycle + RISE)
+- **Routine Engine:** Progressive habit building with streak + Life Score + Dare Engine (solves Fabulous)
 - **Day Mode (V2):** AI reminders tied to goals, focus blocks
 - **Intelligence Layer (V3):** Pattern learning, adaptive difficulty, predictions
 

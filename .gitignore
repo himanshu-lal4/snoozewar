@@ -1,2 +1,16 @@
-.DS_Store
+node_modules/
+.expo/
+ios/
+android/
+dist/
 *.DS_Store
+.DS_Store
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+web-build/
+.env
+.env.local

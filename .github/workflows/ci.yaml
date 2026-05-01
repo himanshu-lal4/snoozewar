@@ -1,0 +1,226 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - pre-develop
+
+concurrency:
+  group: ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-branch:
+    if: >
+      github.head_ref != 'pre-develop' &&
+      github.head_ref != 'develop' &&
+      github.head_ref != 'master'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate branch name format
+        env:
+          BRANCH: ${{ github.head_ref }}
+          TARGET: ${{ github.base_ref }}
+        run: |
+          echo "Source branch: $BRANCH"
+          echo "Target branch: $TARGET"
+
+          # ─────────────────────────────────────────────────
+          # Skip validation for automated bot branches
+          # ─────────────────────────────────────────────────
+          if echo "$BRANCH" | grep -qE "^(renovate|dependabot)/"; then
+            echo "Automated branch detected ($BRANCH) — skipping name validation"
+            exit 0
+          fi
+
+          # ─────────────────────────────────────────────────
+          # Rule 1: Branch name must use an allowed prefix
+          # ─────────────────────────────────────────────────
+          VALID_PREFIXES="feature/ enhancement/ bugfix/ hotfix/ refactor/ chore/ perf/ test/ release/"
+
+          PREFIX_VALID=false
+          for prefix in $VALID_PREFIXES; do
+            if [[ "$BRANCH" == ${prefix}* ]]; then
+              PREFIX_VALID=true
+              break
+            fi
+          done
+
+          if [ "$PREFIX_VALID" = false ]; then
+            echo "::error::Invalid branch name: '$BRANCH'"
+            echo ""
+            echo "Branch names must start with one of:"
+            echo "  feature/      → New features"
+            echo "  enhancement/  → Improve existing features"
+            echo "  bugfix/       → Non-urgent bug fixes"
+            echo "  hotfix/       → Urgent production fixes"
+            echo "  refactor/     → Code restructuring"
+            echo "  chore/        → Dependencies, CI, cleanup"
+            echo "  perf/         → Performance improvements"
+            echo "  test/         → Add or update tests"
+            echo "  release/      → Release candidate"
+            echo ""
+            echo "Example: feature/alarm-screen, bugfix/snooze-counter"
+            exit 1
+          fi
+
+          # ─────────────────────────────────────────────────
+          # Rule 2: Branch must target the correct base branch
+          # ─────────────────────────────────────────────────
+          ERROR=""
+
+          case "$BRANCH" in
+            feature/*|enhancement/*|refactor/*|chore/*|perf/*|test/*|bugfix/*)
+              if [[ "$TARGET" != "develop" ]] && [[ "$TARGET" != "pre-develop" ]]; then
+                ERROR="$BRANCH must target 'pre-develop' or 'develop', not '$TARGET'."
+              fi
+              ;;
+            hotfix/*)
+              if [[ "$TARGET" != "develop" ]]; then
+                ERROR="$BRANCH must target 'develop', not '$TARGET'."
+              fi
+              ;;
+          esac
+
+          if [ -n "$ERROR" ]; then
+            echo "::error::Wrong target branch: $ERROR"
+            exit 1
+          fi
+
+          echo "Branch validation passed: $BRANCH → $TARGET"
+
+  # ── Detect what kind of changes this PR introduces ──────────────────
+  detect-changes:
+    if: >
+      github.head_ref != 'pre-develop' &&
+      github.head_ref != 'develop' &&
+      github.head_ref != 'master'
+    runs-on: ubuntu-latest
+    outputs:
+      has_src_changes: ${{ steps.changes.outputs.has_src_changes }}
+      has_dependency_changes: ${{ steps.changes.outputs.has_dependency_changes }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Fetch base branch
+        run: git fetch origin ${{ github.base_ref }} --depth=1
+
+      - name: Classify changed files
+        id: changes
+        run: |
+          ALL_CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          echo "$ALL_CHANGED"
+
+          # Source code changes (TS/TSX in app/ or src/)
+          SRC=$(echo "$ALL_CHANGED" | grep -E '^(app|src)/.*\.(ts|tsx)$' || true)
+          if [ -n "$SRC" ]; then
+            echo "has_src_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_src_changes=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Dependency changes: package.json, package-lock.json
+          DEPS=$(echo "$ALL_CHANGED" | grep -E '^(package\.json|package-lock\.json)' || true)
+          if [ -n "$DEPS" ]; then
+            echo "has_dependency_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_dependency_changes=false" >> $GITHUB_OUTPUT
+          fi
+
+          echo ""
+          echo "-- Change detection summary --"
+          echo "  Source (TS/TSX):  $([ -n "$SRC" ] && echo 'YES' || echo 'no')"
+          echo "  Dependencies:    $([ -n "$DEPS" ] && echo 'YES' || echo 'no')"
+
+  lint-and-typecheck:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_src_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: git fetch origin ${{ github.base_ref }}
+
+      - name: Get changed files
+        id: changed
+        run: |
+          FILES=$(git diff --name-only --diff-filter=ACM origin/${{ github.base_ref }}...HEAD | grep -E '\.(ts|tsx)$' || true)
+          echo "$FILES" > /tmp/changed_files.txt
+          echo "count=$(echo "$FILES" | grep -c '.' || true)" >> $GITHUB_OUTPUT
+
+      - name: Set up Node.js
+        if: steps.changed.outputs.count != '0'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        if: steps.changed.outputs.count != '0'
+        run: npm ci --legacy-peer-deps
+
+      - name: Run ESLint on changed files
+        if: steps.changed.outputs.count != '0'
+        run: |
+          echo "Linting $(cat /tmp/changed_files.txt | wc -l | tr -d ' ') changed file(s)..."
+          cat /tmp/changed_files.txt | xargs npx eslint
+
+      - name: TypeScript type check
+        if: steps.changed.outputs.count != '0'
+        run: npx tsc --noEmit
+
+  validate-commit-messages:
+    if: >
+      github.head_ref != 'pre-develop' &&
+      github.head_ref != 'develop' &&
+      github.head_ref != 'master'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate PR commit messages
+        run: npx --yes @commitlint/cli --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose
+
+  # ── Validate dependencies ────────────────────────────────────────
+  validate-dependencies:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_dependency_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies (validates package-lock.json)
+        run: |
+          npm ci --legacy-peer-deps || {
+            echo "::error::npm ci failed."
+            echo ""
+            echo "If you added a new package, make sure to:"
+            echo "  1. Run 'npm install' locally"
+            echo "  2. Commit both package.json AND package-lock.json"
+            exit 1
+          }
+
+      - name: Run Expo Doctor
+        run: npx expo-doctor
