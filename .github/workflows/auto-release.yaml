@@ -1,0 +1,159 @@
+name: Auto Release
+
+# Creates a GitHub Release with changelog when code is pushed to master.
+# Groups commits by type (feat, fix, chore, etc.) for clean release notes.
+
+on:
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - '**.md'
+      - 'competitors/**'
+      - 'market/**'
+      - 'strategy/**'
+      - 'validation/**'
+      - 'concepts/**'
+      - 'audience/**'
+      - 'prd/**'
+      - 'notes/**'
+
+concurrency:
+  group: auto-release-master
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get version from package.json
+        id: version
+        run: |
+          VERSION=$(node -e "console.log(require('./package.json').version)")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Check if tag exists
+        id: check_tag
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Tag $TAG exists — will update"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create or move tag
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+
+          if [ "${{ steps.check_tag.outputs.exists }}" = "true" ]; then
+            git tag -d "$TAG"
+            git push origin :refs/tags/"$TAG" || true
+          fi
+
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="${{ steps.version.outputs.tag }}"
+
+          # Find previous tag
+          PREV_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | grep -v "^${TAG}$" | head -1 || echo "")
+
+          if [ -z "$PREV_TAG" ]; then
+            RANGE="HEAD"
+          else
+            RANGE="${PREV_TAG}..HEAD"
+          fi
+
+          FEATURES=$(git log $RANGE --pretty=format:"%s" --extended-regexp --grep="^feat" | sed 's/^feat[!:(][^:]*: *//' | sed 's/^feat: *//' | sed 's/^/- /' || true)
+          ENHANCEMENTS=$(git log $RANGE --pretty=format:"%s" --extended-regexp --grep="^enhancement" | sed 's/^enhancement[!:(][^:]*: *//' | sed 's/^enhancement: *//' | sed 's/^/- /' || true)
+          FIXES=$(git log $RANGE --pretty=format:"%s" --extended-regexp --grep="^(fix|bugfix)" | sed -E 's/^(fix|bugfix)[!:(][^:]*: *//' | sed -E 's/^(fix|bugfix): *//' | sed 's/^/- /' || true)
+          HOTFIXES=$(git log $RANGE --pretty=format:"%s" --extended-regexp --grep="^hotfix" | sed 's/^hotfix[!:(][^:]*: *//' | sed 's/^hotfix: *//' | sed 's/^/- /' || true)
+          OTHERS=$(git log $RANGE --pretty=format:"%s" --extended-regexp --grep="^(chore|ci|docs|test|style|refactor|perf|revert)" | sed 's/^[a-z]*[!:(][^:]*: *//' | sed 's/^[a-z]*: *//' | sed 's/^/- /' || true)
+
+          {
+            echo "changelog<<CHANGELOG_EOF"
+            echo "## What's Changed in v$VERSION"
+            echo ""
+
+            if [ -n "$FEATURES" ]; then
+              echo "### New Features"
+              echo "$FEATURES"
+              echo ""
+            fi
+
+            if [ -n "$ENHANCEMENTS" ]; then
+              echo "### Enhancements"
+              echo "$ENHANCEMENTS"
+              echo ""
+            fi
+
+            if [ -n "$FIXES" ]; then
+              echo "### Bug Fixes"
+              echo "$FIXES"
+              echo ""
+            fi
+
+            if [ -n "$HOTFIXES" ]; then
+              echo "### Hotfixes"
+              echo "$HOTFIXES"
+              echo ""
+            fi
+
+            if [ -n "$OTHERS" ]; then
+              echo "### Other Changes"
+              echo "$OTHERS"
+              echo ""
+            fi
+
+            echo "---"
+            if [ -n "$PREV_TAG" ]; then
+              echo "**Full Changelog:** https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG}"
+            else
+              echo "**Full Changelog:** https://github.com/${{ github.repository }}/releases/tag/${TAG}"
+            fi
+            echo "CHANGELOG_EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG_EXISTS="${{ steps.check_tag.outputs.exists }}"
+          CHANGELOG=$(cat <<'CLEOF'
+          ${{ steps.changelog.outputs.changelog }}
+          CLEOF
+          )
+
+          if [ "$TAG_EXISTS" = "true" ]; then
+            gh release edit "$TAG" \
+              --title "v$VERSION" \
+              --notes "$CHANGELOG"
+            echo "Updated existing release $TAG"
+          else
+            gh release create "$TAG" \
+              --title "v$VERSION" \
+              --notes "$CHANGELOG" \
+              --latest
+            echo "Created new release $TAG"
+          fi

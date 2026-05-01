@@ -1,0 +1,88 @@
+#!/bin/sh
+
+# ─────────────────────────────────────────────────────
+# PRE-PUSH HOOK
+# Validates branch naming before pushing.
+# Ensures consistent branch conventions.
+# ─────────────────────────────────────────────────────
+
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+# Skip validation for protected branches
+if [ "$BRANCH" = "master" ] || [ "$BRANCH" = "develop" ] || [ "$BRANCH" = "pre-develop" ] || [ "$BRANCH" = "HEAD" ]; then
+  exit 0
+fi
+
+VALID=false
+MATCHED_PREFIX=""
+case "$BRANCH" in
+  feature/*)      VALID=true; MATCHED_PREFIX="feature" ;;
+  enhancement/*)  VALID=true; MATCHED_PREFIX="enhancement" ;;
+  bugfix/*)       VALID=true; MATCHED_PREFIX="bugfix" ;;
+  hotfix/*)       VALID=true; MATCHED_PREFIX="hotfix" ;;
+  refactor/*)     VALID=true; MATCHED_PREFIX="refactor" ;;
+  chore/*)        VALID=true; MATCHED_PREFIX="chore" ;;
+  perf/*)         VALID=true; MATCHED_PREFIX="perf" ;;
+  test/*)         VALID=true; MATCHED_PREFIX="test" ;;
+  release/*)      VALID=true; MATCHED_PREFIX="release" ;;
+esac
+
+if [ "$VALID" = false ]; then
+  echo ""
+  echo "+---------------------------------------------------------+"
+  echo "|        INVALID BRANCH NAME                              |"
+  echo "+---------------------------------------------------------+"
+  echo ""
+  echo "  Your branch:  $BRANCH"
+  echo ""
+
+  # Try to suggest what they might have meant
+  SUGGESTION=""
+  case "$BRANCH" in
+    feat/*|feat-*|features/*)
+      SUGGESTION="feature/${BRANCH#*/}" ;;
+    bug/*|bugs/*|fix/*|fixes/*)
+      SUGGESTION="bugfix/${BRANCH#*/}" ;;
+    hot/*|hotfixes/*|patch/*)
+      SUGGESTION="hotfix/${BRANCH#*/}" ;;
+    enhance/*|improvement/*|improve/*)
+      SUGGESTION="enhancement/${BRANCH#*/}" ;;
+    ref/*|cleanup/*)
+      SUGGESTION="refactor/${BRANCH#*/}" ;;
+    ci/*|deps/*|dep/*|build/*)
+      SUGGESTION="chore/${BRANCH#*/}" ;;
+    performance/*)
+      SUGGESTION="perf/${BRANCH#*/}" ;;
+    tests/*|testing/*)
+      SUGGESTION="test/${BRANCH#*/}" ;;
+  esac
+
+  if [ -n "$SUGGESTION" ]; then
+    echo "  Did you mean:  $SUGGESTION"
+    echo "  Rename with:   git branch -m \"$BRANCH\" \"$SUGGESTION\""
+    echo ""
+  fi
+
+  echo "  Available prefixes:"
+  echo ""
+  echo "    feature/       New feature"
+  echo "    enhancement/   Improve existing feature"
+  echo "    bugfix/        Bug fix"
+  echo "    hotfix/        Urgent production fix"
+  echo "    refactor/      Code restructuring"
+  echo "    chore/         Deps, CI, tooling, cleanup"
+  echo "    perf/          Performance improvement"
+  echo "    test/          Add or update tests"
+  echo "    release/       Release candidate"
+  echo ""
+  echo "  How to fix:"
+  echo "    Rename your branch (your commits are preserved):"
+  echo ""
+  echo "    git branch -m \"$BRANCH\" \"feature/your-description\""
+  echo ""
+  echo "    Then push again:"
+  echo ""
+  echo "    git push -u origin feature/your-description"
+  echo ""
+  exit 1
+fi

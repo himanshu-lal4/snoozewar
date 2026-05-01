@@ -1,0 +1,91 @@
+#!/bin/sh
+
+# ─────────────────────────────────────────────────────
+# COMMIT-MSG HOOK
+# Validates commit message format using commitlint.
+# Shows helpful guidance when the message is invalid.
+# ─────────────────────────────────────────────────────
+
+COMMIT_MSG=$(cat "$1")
+
+# Run commitlint and capture exit code
+LINT_EXIT=0
+LINT_OUTPUT=$(npx --no -- commitlint --edit "$1" 2>&1) || LINT_EXIT=$?
+
+if [ "$LINT_EXIT" -ne 0 ]; then
+  echo ""
+  echo "+---------------------------------------------------------+"
+  echo "|           COMMIT MESSAGE REJECTED                       |"
+  echo "+---------------------------------------------------------+"
+  echo ""
+  echo "  Your message:  \"$COMMIT_MSG\""
+  echo ""
+
+  # Detect common mistakes and give targeted help
+  STARTS_UPPER=$(echo "$COMMIT_MSG" | grep -cE "^[A-Z]" || true)
+  HAS_TYPE=$(echo "$COMMIT_MSG" | grep -cE "^[a-z]+(\(.+\))?!?:" || true)
+  NO_SPACE=$(echo "$COMMIT_MSG" | grep -cE "^[a-z]+(\(.+\))?!?:[^ ]" || true)
+  EMPTY_SUBJECT=$(echo "$COMMIT_MSG" | grep -cE "^[a-z]+(\(.+\))?!?:[[:space:]]*$" || true)
+
+  if [ "$STARTS_UPPER" -gt 0 ]; then
+    echo "  [!] Problem: Message starts with an uppercase letter."
+    echo "      The type prefix must be all lowercase."
+    echo ""
+    echo "      BAD:   Feat: add new screen"
+    echo "      GOOD:  feat: add new screen"
+    echo ""
+  fi
+
+  if [ "$HAS_TYPE" -eq 0 ]; then
+    echo "  [!] Problem: Missing or invalid type prefix."
+    echo ""
+    echo "      Your commit message must follow this format:"
+    echo ""
+    echo "        type: description"
+    echo "        type(scope): description"
+    echo ""
+    echo "      Examples:"
+    echo "        feat: add animated splash screen"
+    echo "        fix(alarm): resolve snooze counter bug"
+    echo "        chore: update dependencies"
+    echo ""
+  fi
+
+  if [ "$NO_SPACE" -gt 0 ]; then
+    echo "  [!] Problem: Missing space after the colon."
+    echo ""
+    echo "      BAD:   fix:resolve crash on launch"
+    echo "      GOOD:  fix: resolve crash on launch"
+    echo ""
+  fi
+
+  if [ "$EMPTY_SUBJECT" -gt 0 ]; then
+    echo "  [!] Problem: Empty description after the type prefix."
+    echo ""
+    echo "      BAD:   fix: "
+    echo "      GOOD:  fix: resolve crash on launch"
+    echo ""
+  fi
+
+  echo "  Allowed commit types:"
+  echo ""
+  echo "    feat           New feature"
+  echo "    enhancement    Improve existing feature"
+  echo "    fix            Bug fix"
+  echo "    bugfix         Bug fix (alias for fix)"
+  echo "    hotfix         Urgent production fix"
+  echo "    refactor       Code restructuring"
+  echo "    chore          Dependencies, CI, cleanup"
+  echo "    perf           Performance improvement"
+  echo "    test           Add or update tests"
+  echo "    docs           Documentation only"
+  echo "    style          Formatting, semicolons, etc."
+  echo "    ci             CI/CD pipeline changes"
+  echo "    revert         Revert a previous commit"
+  echo ""
+  echo "  Quick fix -- copy, edit, and run:"
+  echo ""
+  echo "    git commit -m \"feat: your description here\""
+  echo ""
+  exit 1
+fi
