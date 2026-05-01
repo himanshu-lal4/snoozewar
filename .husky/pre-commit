@@ -1,0 +1,197 @@
+#!/bin/sh
+
+# ─────────────────────────────────────────────────────
+# PRE-COMMIT HOOK
+# Runs on every commit to catch issues early.
+# Checks: merge conflicts, secrets, large files, lint, types
+# ─────────────────────────────────────────────────────
+
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
+
+if [ -z "$STAGED_FILES" ]; then
+  exit 0
+fi
+
+# Use PID-based temp files to avoid collisions between parallel runs
+TMPDIR_HOOK=$(mktemp -d)
+CONFLICT_TMP="$TMPDIR_HOOK/conflicts"
+SECRET_TMP="$TMPDIR_HOOK/secrets"
+LARGE_TMP="$TMPDIR_HOOK/large"
+
+# Clean up temp files on exit (normal or error)
+cleanup() { rm -rf "$TMPDIR_HOOK"; }
+trap cleanup EXIT
+
+HAS_ERROR=false
+
+# ── 1. Check for unresolved merge conflict markers ──────────
+echo "$STAGED_FILES" | while IFS= read -r file; do
+  [ -z "$file" ] && continue
+  [ ! -f "$file" ] && continue
+  IS_TEXT=$(file "$file" | grep -c "text" || true)
+  if [ "$IS_TEXT" -gt 0 ]; then
+    HAS_MARKERS=$(grep -clE '^(<<<<<<<|=======|>>>>>>>)' "$file" 2>/dev/null || true)
+    if [ "$HAS_MARKERS" -gt 0 ]; then
+      echo "$file" >> "$CONFLICT_TMP"
+    fi
+  fi
+done
+
+if [ -f "$CONFLICT_TMP" ]; then
+  HAS_ERROR=true
+  echo ""
+  echo "+---------------------------------------------------------+"
+  echo "|        UNRESOLVED MERGE CONFLICTS FOUND                 |"
+  echo "+---------------------------------------------------------+"
+  echo ""
+  echo "  These files still have conflict markers (<<<<<<<):"
+  echo ""
+  while IFS= read -r f; do
+    echo "    - $f"
+  done < "$CONFLICT_TMP"
+  echo ""
+  echo "  How to fix:"
+  echo "    1. Open each file listed above"
+  echo "    2. Search for <<<<<<< (the conflict start marker)"
+  echo "    3. Keep the correct code, delete the markers and the wrong code"
+  echo "    4. Stage the fixed files:  git add <file>"
+  echo "    5. Try your commit again"
+  echo ""
+fi
+
+# ── 2. Check for accidental secrets / credentials ───────────
+echo "$STAGED_FILES" | while IFS= read -r file; do
+  [ -z "$file" ] && continue
+  [ ! -f "$file" ] && continue
+  case "$file" in
+    *.lock|*.svg|*.png|*.jpg|*.gif|*.ico|*.woff*|*.ttf|*.eot|*.map) continue ;;
+  esac
+  IS_TEXT=$(file "$file" | grep -c "text" || true)
+  if [ "$IS_TEXT" -gt 0 ]; then
+    DIFF_ADDED=$(git diff --cached -- "$file" | grep "^+" || true)
+    if [ -n "$DIFF_ADDED" ]; then
+      HAS_SECRET=$(echo "$DIFF_ADDED" | grep -ciE "(AKIA[0-9A-Z]{16}|sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36}|-----BEGIN (RSA |EC )?PRIVATE KEY-----)" || true)
+      if [ "$HAS_SECRET" -gt 0 ]; then
+        echo "$file" >> "$SECRET_TMP"
+      fi
+    fi
+  fi
+done
+
+if [ -f "$SECRET_TMP" ]; then
+  HAS_ERROR=true
+  echo ""
+  echo "+---------------------------------------------------------+"
+  echo "|        POSSIBLE SECRETS / CREDENTIALS DETECTED          |"
+  echo "+---------------------------------------------------------+"
+  echo ""
+  echo "  These staged files may contain sensitive data:"
+  echo ""
+  while IFS= read -r f; do
+    echo "    - $f"
+  done < "$SECRET_TMP"
+  echo ""
+  echo "  How to fix:"
+  echo "    1. Move secrets to a .env file (never commit .env)"
+  echo "    2. Use environment variables in code instead of hardcoded values"
+  echo "    3. Unstage the file:  git reset HEAD <file>"
+  echo "    4. Make sure .env is in .gitignore"
+  echo ""
+fi
+
+# ── 3. Check for large files (>1MB) ────────────────────────
+echo "$STAGED_FILES" | while IFS= read -r file; do
+  [ -z "$file" ] && continue
+  [ ! -f "$file" ] && continue
+  FILE_SIZE=$(wc -c < "$file" | tr -d ' ')
+  if [ "$FILE_SIZE" -gt 1048576 ]; then
+    SIZE_MB=$(expr "$FILE_SIZE" / 1048576)
+    echo "${file} (${SIZE_MB}MB+)" >> "$LARGE_TMP"
+  fi
+done
+
+if [ -f "$LARGE_TMP" ]; then
+  HAS_ERROR=true
+  echo ""
+  echo "+---------------------------------------------------------+"
+  echo "|        LARGE FILES DETECTED (>1MB)                      |"
+  echo "+---------------------------------------------------------+"
+  echo ""
+  echo "  These files exceed the 1MB size limit:"
+  echo ""
+  while IFS= read -r f; do
+    echo "    - $f"
+  done < "$LARGE_TMP"
+  echo ""
+  echo "  How to fix:"
+  echo "    - Images:   Compress them or host on a CDN"
+  echo "    - Binaries: Add to .gitignore (don't track build output)"
+  echo "    - Data:     Use Git LFS:  git lfs track '*.zip'"
+  echo "    - Unstage:  git reset HEAD <file>"
+  echo ""
+fi
+
+# Exit early if any structural checks failed
+if [ "$HAS_ERROR" = true ]; then
+  echo "  Fix the issues above, then try your commit again."
+  echo ""
+  exit 1
+fi
+
+# ── 4. Check for oversized source files (>400 lines) ───────
+echo "$STAGED_FILES" | while IFS= read -r file; do
+  [ -z "$file" ] && continue
+  [ ! -f "$file" ] && continue
+  case "$file" in
+    src/*.ts|src/*.tsx|app/*.ts|app/*.tsx)
+      LINE_COUNT=$(wc -l < "$file" | tr -d ' ')
+      if [ "$LINE_COUNT" -gt 400 ]; then
+        echo ""
+        echo "+---------------------------------------------------------+"
+        echo "|        LARGE SOURCE FILE WARNING                        |"
+        echo "+---------------------------------------------------------+"
+        echo ""
+        echo "  $file has $LINE_COUNT lines (limit: 400)"
+        echo ""
+        echo "  How to fix:"
+        echo "    - Extract helper functions into a separate utils file"
+        echo "    - Split sub-components into their own files"
+        echo "    - Move types/interfaces to a types.ts file"
+        echo "    - Move styles to a styles.ts file"
+        echo ""
+        echo "  This is a warning — your commit will still proceed."
+        echo ""
+      fi
+      ;;
+  esac
+done
+
+# ── 5. Run ESLint on staged files (via lint-staged) ────────
+echo "Checking code quality (ESLint + Prettier)..."
+npx lint-staged 2>&1
+LINT_EXIT=$?
+
+if [ "$LINT_EXIT" -ne 0 ]; then
+  exit 1
+fi
+
+echo "  Lint passed."
+
+# ── 6. Run TypeScript check on staged src/ and app/ files ──
+TS_STAGED=$(echo "$STAGED_FILES" | grep -E '\.(ts|tsx)$' || true)
+if [ -n "$TS_STAGED" ]; then
+  echo "Checking types (TypeScript)..."
+  npx tsc --noEmit 2>&1
+  TSC_EXIT=$?
+  if [ "$TSC_EXIT" -ne 0 ]; then
+    echo ""
+    echo "+---------------------------------------------------------+"
+    echo "|        TYPESCRIPT ERRORS FOUND                          |"
+    echo "+---------------------------------------------------------+"
+    echo ""
+    echo "  Fix the type errors above, then try your commit again."
+    echo ""
+    exit 1
+  fi
+  echo "  TypeScript passed."
+fi
