@@ -12,6 +12,8 @@ Complete research and strategy foundation for **SnoozeWar** — a mobile app tha
 - **Find any research:** `MASTER-REFERENCE.md`
 - **Claude instructions:** `CLAUDE.md`
 
+##Jaskaran
+
 ## What's Been Done
 - [x] Idea validation — rejected 7 ideas, landed on behavior enforcement
 - [x] Competitor analysis — 30+ apps analyzed (alarm, sleep, habit, focus, productivity)
